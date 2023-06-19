@@ -1,108 +1,131 @@
-function e(e) {
-  return new Promise((t, n) => {
-    (e.oncomplete = e.onsuccess = () => t(e.result)),
-      (e.onabort = e.onerror = () => n(e.error));
-  });
+/**
+ *
+ * Copyright 2016, Jake Archibald
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+class Store {
+  constructor(dbName = 'keyval-store', storeName = 'keyval', version = 1, onUpgrade) {
+      this.storeName = storeName;
+      this._dbp = new Promise((resolve, reject) => {
+          const openreq = indexedDB.open(dbName, version);
+          openreq.onerror = () => reject(openreq.error);
+          openreq.onsuccess = () => resolve(openreq.result);
+          openreq.onupgradeneeded = (ev) => {
+              // Get or create the object store
+              let objStore;
+              if (openreq.result.objectStoreNames.contains(storeName)) {
+                  objStore = openreq.transaction.objectStore(storeName);
+              } else {
+                  objStore = openreq.result.createObjectStore(storeName);
+              }
+
+              if (onUpgrade) {
+                  onUpgrade(objStore, ev.oldVersion);
+              }
+          };
+      });
+  }
+  _withIDBStore(type, callback) {
+      return this._dbp.then(db => new Promise((resolve, reject) => {
+          const transaction = db.transaction(this.storeName, type);
+          transaction.oncomplete = (res) => resolve(res);
+          transaction.onabort = transaction.onerror = () => reject(transaction.error);
+          callback(transaction.objectStore(this.storeName));
+      }));
+  }
 }
-function t(t, n) {
-  const r = indexedDB.open(t);
-  r.onupgradeneeded = () => r.result.createObjectStore(n);
-  const o = e(r);
-  return (e, t) => o.then((r) => t(r.transaction(n, e).objectStore(n)));
+let store;
+function getDefaultStore() {
+  if (!store)
+      store = new Store();
+  return store;
 }
-let n;
-function r() {
-  return n || (n = t("keyval-store", "keyval")), n;
+class IDBKeyVal {
+  static get(key, store = getDefaultStore()) {
+      let req;
+      return store._withIDBStore('readonly', store => {
+          req = store.get(key);
+      }).then(() => req.result);
+  }
+  static set(key, value, store = getDefaultStore()) {
+      return store._withIDBStore('readwrite', store => {
+          store.put(value, key);
+      });
+  }
+  static del(key, store = getDefaultStore()) {
+      return store._withIDBStore('readwrite', store => {
+          store.delete(key);
+      });
+  }
+  static clear(store = getDefaultStore()) {
+      return store._withIDBStore('readwrite', store => {
+          store.clear();
+      });
+  }
+  static keys(store = getDefaultStore()) {
+      const keys = [];
+      return store._withIDBStore('readonly', store => {
+          // This would be store.getAllKeys(), but it isn't supported by Edge or Safari.
+          // And openKeyCursor isn't supported by Safari.
+          (store.openKeyCursor || store.openCursor).call(store).onsuccess = function () {
+              if (!this.result)
+                  return;
+              keys.push(this.result.key);
+              this.result.continue();
+          };
+      }).then(() => keys);
+  }
+  static getAllByIndex(indexName, value, store = getDefaultStore()) {
+      let recordArr = [];
+      return store._withIDBStore('readonly', store => {
+          let index = store.index(indexName);
+          let range = IDBKeyRange.only(value)
+          // TODO: This is a mix of Promised and API indexeddb. It's ugly and shameful
+          // but Promised didn't seem to work like the Google example. Fix this to
+          // make it all Promised
+          return index.openCursor(range).onsuccess = function (event) {
+              let cursor = event.target.result;
+              if (cursor) {
+                  recordArr.push({
+                      key: cursor.primaryKey,
+                      value: cursor.value
+                  });
+                  cursor.continue();
+              } else {
+                  return this.transaction.oncomplete(recordArr);
+              }
+          };
+      });
+  }
+
+  static getAllKeysByIndex(indexName, value, store = getDefaultStore()) {
+      let keys = [];
+      return store._withIDBStore('readonly', store => {
+          let index = store.index(indexName);
+          let range = IDBKeyRange.only(value)
+          return index.openCursor(range).onsuccess = function (event) {
+              let cursor = event.target.result;
+              if (cursor) {
+                  keys.push(cursor.primaryKey);
+                  cursor.continue();
+              } else {
+                  return this.transaction.oncomplete(keys);
+              }
+          };
+      });
+  }
 }
-function o(t, n = r()) {
-  return n("readonly", (n) => e(n.get(t)));
-}
-function u(t, n, o = r()) {
-  return o("readwrite", (r) => (r.put(n, t), e(r.transaction)));
-}
-function c(t, n = r()) {
-  return n(
-    "readwrite",
-    (n) => (t.forEach((e) => n.put(e[1], e[0])), e(n.transaction))
-  );
-}
-function s(t, n = r()) {
-  return n("readonly", (n) => Promise.all(t.map((t) => e(n.get(t)))));
-}
-function a(t, n, o = r()) {
-  return o(
-    "readwrite",
-    (r) =>
-      new Promise((o, u) => {
-        r.get(t).onsuccess = function () {
-          try {
-            r.put(n(this.result), t), o(e(r.transaction));
-          } catch (e) {
-            u(e);
-          }
-        };
-      })
-  );
-}
-function i(t, n = r()) {
-  return n("readwrite", (n) => (n.delete(t), e(n.transaction)));
-}
-function l(t, n = r()) {
-  return n(
-    "readwrite",
-    (n) => (t.forEach((e) => n.delete(e)), e(n.transaction))
-  );
-}
-function f(t = r()) {
-  return t("readwrite", (t) => (t.clear(), e(t.transaction)));
-}
-function d(t, n) {
-  return (
-    (t.openCursor().onsuccess = function () {
-      this.result && (n(this.result), this.result.continue());
-    }),
-    e(t.transaction)
-  );
-}
-function h(t = r()) {
-  return t("readonly", (t) => {
-    if (t.getAllKeys) return e(t.getAllKeys());
-    const n = [];
-    return d(t, (e) => n.push(e.key)).then(() => n);
-  });
-}
-function y(t = r()) {
-  return t("readonly", (t) => {
-    if (t.getAll) return e(t.getAll());
-    const n = [];
-    return d(t, (e) => n.push(e.value)).then(() => n);
-  });
-}
-function p(t = r()) {
-  return t("readonly", (n) => {
-    if (n.getAll && n.getAllKeys)
-      return Promise.all([e(n.getAllKeys()), e(n.getAll())]).then(([e, t]) =>
-        e.map((e, n) => [e, t[n]])
-      );
-    const r = [];
-    return t("readonly", (e) =>
-      d(e, (e) => r.push([e.key, e.value])).then(() => r)
-    );
-  });
-}
-export {
-  f as clear,
-  t as createStore,
-  i as del,
-  l as delMany,
-  p as entries,
-  o as get,
-  s as getMany,
-  h as keys,
-  e as promisifyRequest,
-  u as set,
-  c as setMany,
-  a as update,
-  y as values,
-};
-export default null;
+
+
+export { Store, IDBKeyVal };

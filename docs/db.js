@@ -1,18 +1,18 @@
 
-import { set, get, createStore } from './idb-keyval.js';
+import { IDBKeyVal, Store } from './idb-keyval.js';
 
 const key = 'foo';
 
 export async function writeTestValue(value) {
-  return set(key, value, store);
+  return IDBKeyVal.set(key, value, store);
 }
 
 export async function getTestValue() {
-  return get(key, store);
+  return IDBKeyVal.get(key, store);
 }
 
 
-const store = createStore(
+const store = new Store(
   'testing',
   'testing',
   1
