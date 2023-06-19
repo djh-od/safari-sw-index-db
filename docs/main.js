@@ -25,7 +25,6 @@ async function writeToDatabase() {
 async function registerServiceWorker() {
   try {
     const reg = await navigator.serviceWorker.register('./sw.js', {
-      scope: '/',
       type: 'module'
     });
     reg.update();
@@ -34,7 +33,7 @@ async function registerServiceWorker() {
       log('Got message: ' + event.data?.msg);
     });
   } catch (ex) {
-    console.error('Failed to register SW:', sw);
+    console.error('Failed to register SW:', ex);
   }
 }
 
