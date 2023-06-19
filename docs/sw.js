@@ -9,12 +9,14 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
+  console.log('SW - fetching: ', event);
   event.waitUntil(
     (async () => {
       if (!event.clientId) return;
       const client = await clients.get(event.clientId);
       if (!client) return console.warn('No client?');
       const result = await getTestValue();
+      console.log('Value: ', result);
       client.postMessage({
         msg: result
       });
